@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>realtime-rc</title>
+    <style>
+      body {
+        background: #111;
+        color: white;
+        margin: 0;
+      }
+
+      video {
+        width: 100%;
+        height: 400px;
+      }
+
+      .controls {
+        display: flex;
+        justify-content: center;
+        margin-top: 50px;
+      }
+
+      .joystick {
+        width: 200px;
+        height: 200px;
+        background: #555;
+        border-radius: 100%;
+        position: relative;
+      }
+
+      .joystick_stick {
+        width: 50px;
+        height: 50px;
+        background: #888;
+        border-radius: 100%;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+      }
+    </style>
+  </head>
+  <body>
+    <video id="video" muted autoplay playsinline></video>
+    <div class="controls">
+      <div class="joystick" id="joystick">
+        <div class="joystick_stick"></div>
+      </div>
+    </div>
+
+    <script>
+      window.sendOffset = (x, y) => {
+        // Waiting for data channel :)
+      };
+
+      // Joystick stuff
+      {
+        const parentEl = document.getElementById('joystick');
+        const stickEl = parentEl.querySelector('div');
+
+        let moving = false;
+        function handleClientXY(clientX, clientY) {
+          if (!moving) {
+            return;
+          }
+
+          const parentRect = parentEl.getBoundingClientRect();
+          const offsetX = clientX - parentRect.left - parentRect.width / 2;
+          const offsetY = clientY - parentRect.top - parentRect.height / 2;
+          const angle = Math.atan2(offsetY, offsetX);
+          const maxRadius = parentRect.width / 2;
+          const distance = Math.min(
+            maxRadius,
+            Math.sqrt(Math.pow(offsetX, 2) + Math.pow(offsetY, 2))
+          );
+          const x = distance * Math.cos(angle);
+          const y = distance * Math.sin(angle);
+          sendOffset(x / maxRadius, (y / maxRadius) * -1);
+
+          stickEl.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+        }
+
+        function handleEnd() {
+          moving = false;
+          stickEl.style.transform = `translate(-50%, -50%)`;
+          sendOffset(0, 0);
+        }
+
+        stickEl.addEventListener('mousedown', e => {
+          moving = true;
+        });
+
+        stickEl.addEventListener('touchstart', e => {
+          moving = true;
+        });
+
+        window.addEventListener('mousemove', e => {
+          handleClientXY(e.clientX, e.clientY);
+        });
+
+        window.addEventListener('touchmove', e => {
+          const touch = e.touches[0];
+          if (!touch) {
+            return;
+          }
+
+          handleClientXY(touch.clientX, touch.clientY);
+        });
+
+        window.addEventListener('mouseup', () => {
+          handleEnd();
+        });
+
+        window.addEventListener('touchend', () => {
+          handleEnd();
+        });
+      }
+
+      {
+        const pc = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: 'stun:stun.l.google.com:19302',
+            },
+          ],
+        });
+        pc.ontrack = event => {
+          console.log('ontrack', event);
+          if (event.track.kind !== 'video') {
+            return;
+          }
+
+          const el = document.getElementById('video');
+          el.srcObject = event.streams[0];
+          el.autoplay = true;
+          el.controls = false;
+          el.muted = true;
+          el.playsinline = true;
+          el.onloadeddata = () => console.log('loaded data');
+        };
+
+        pc.onconnectionstatechange = ev => {
+          console.log(ev);
+        };
+
+        pc.ondatachannel = e => {
+          console.log('dc', e);
+          const dc = e.channel;
+
+          dc.onclose = () => {
+            if (dc.label === 'control') {
+              window.sendOffset = (x, y) => {};
+            }
+          };
+
+          dc.onopen = () => {
+            if (dc.label === 'control') {
+              window.sendOffset = (x, y) => {
+                dc.send(JSON.stringify({ Move: [x, y] }));
+              };
+            }
+          };
+
+          dc.onmessage = e =>
+            console.log(
+              `Message from DataChannel '${dc.label}' payload '${e.data}'`
+            );
+        };
+
+        // Create a noop DataChannel. By default PeerConnections do not connect
+        // if they have no media tracks or DataChannels
+        pc.createDataChannel('noop');
+        pc.addTransceiver('video');
+
+        pc.createOffer()
+          .then(offer => {
+            pc.setLocalDescription(offer);
+
+            return fetch('/createPeerConnection', {
+              method: 'post',
+              headers: {
+                Accept: 'application/json, text/plain, */*',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(offer),
+            });
+          })
+          .then(res => res.json())
+          .then(res => pc.setRemoteDescription(res))
+          .catch(alert);
+      }
+    </script>
+  </body>
+</html>
