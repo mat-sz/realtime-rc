@@ -12,9 +12,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use tokio::sync::Notify;
 use webrtc::api::media_engine::MIME_TYPE_H264;
-use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::media::Sample;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocal;
@@ -106,9 +107,13 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
                 .await
                 .unwrap();
 
+            let notify_tx = Arc::new(Notify::new());
+            let notify_video = notify_tx.clone();
+
             // Video handling:
             let video_task = actix_rt::spawn(async move {
-                actix_rt::time::sleep(Duration::from_millis(2000)).await;
+                notify_video.notified().await;
+                actix_rt::time::sleep(Duration::from_millis(2500)).await;
 
                 let frame = {
                     let option = CURRENT_FRAME.lock();
@@ -155,17 +160,15 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
                 Result::<()>::Ok(())
             });
 
-            // Set the handler for Peer connection state
-            // This will notify you when the peer has connected/disconnected
-            pc.on_ice_connection_state_change(Box::new(move |s: RTCIceConnectionState| {
-                if s == RTCIceConnectionState::Closed
-                    || s == RTCIceConnectionState::Completed
-                    || s == RTCIceConnectionState::Disconnected
-                    || s == RTCIceConnectionState::Failed
-                {
-                    video_task.abort();
+            pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
+                if s == RTCPeerConnectionState::Connected {
+                    println!("Status connected, starting stream");
+                    notify_tx.notify_waiters();
                 }
 
+                if s == RTCPeerConnectionState::Disconnected {
+                    video_task.abort();
+                }
                 Box::pin(async {})
             }));
         });

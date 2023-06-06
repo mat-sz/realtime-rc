@@ -9,7 +9,6 @@ use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -123,17 +122,9 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
         Box::pin(async move {})
     }));
 
-    // Set the handler for Peer connection state
-    // This will notify you when the peer has connected/disconnected
-    pc.on_ice_connection_state_change(Box::new(move |s: RTCIceConnectionState| {
-        println!("ICE Connection State has changed: {s}");
-
-        Box::pin(async {})
-    }));
-
     println!("PeerConnection has been created");
 
-    actix_rt::time::sleep(Duration::from_millis(1000)).await;
+    actix_rt::time::sleep(Duration::from_millis(2000)).await;
     do_signaling(&pc, req_body).await
 }
 
@@ -143,7 +134,7 @@ pub async fn start() {
             .service(create_peer_connection)
             .route("/{filename:.*}", web::get().to(index))
     })
-    .bind(("127.0.0.1", 8080))
+    .bind(("0.0.0.0", 8080))
     .unwrap()
     .run()
     .await

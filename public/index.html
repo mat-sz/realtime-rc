@@ -2,11 +2,18 @@
 <html>
   <head>
     <title>realtime-rc</title>
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content"
+    />
     <style>
       body {
         background: #111;
         color: white;
         margin: 0;
+        user-select: none;
+        touch-action: none;
+        -webkit-touch-callout: none;
       }
 
       video {
@@ -49,146 +56,150 @@
     </div>
 
     <script>
-      window.sendOffset = (x, y) => {
-        // Waiting for data channel :)
-      };
-
-      // Joystick stuff
-      {
-        const parentEl = document.getElementById('joystick');
-        const stickEl = parentEl.querySelector('div');
-
-        let moving = false;
-        function handleClientXY(clientX, clientY) {
-          if (!moving) {
-            return;
-          }
-
-          const parentRect = parentEl.getBoundingClientRect();
-          const offsetX = clientX - parentRect.left - parentRect.width / 2;
-          const offsetY = clientY - parentRect.top - parentRect.height / 2;
-          const angle = Math.atan2(offsetY, offsetX);
-          const maxRadius = parentRect.width / 2;
-          const distance = Math.min(
-            maxRadius,
-            Math.sqrt(Math.pow(offsetX, 2) + Math.pow(offsetY, 2))
-          );
-          const x = distance * Math.cos(angle);
-          const y = distance * Math.sin(angle);
-          sendOffset(x / maxRadius, (y / maxRadius) * -1);
-
-          stickEl.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
-        }
-
-        function handleEnd() {
-          moving = false;
-          stickEl.style.transform = `translate(-50%, -50%)`;
-          sendOffset(0, 0);
-        }
-
-        stickEl.addEventListener('mousedown', e => {
-          moving = true;
-        });
-
-        stickEl.addEventListener('touchstart', e => {
-          moving = true;
-        });
-
-        window.addEventListener('mousemove', e => {
-          handleClientXY(e.clientX, e.clientY);
-        });
-
-        window.addEventListener('touchmove', e => {
-          const touch = e.touches[0];
-          if (!touch) {
-            return;
-          }
-
-          handleClientXY(touch.clientX, touch.clientY);
-        });
-
-        window.addEventListener('mouseup', () => {
-          handleEnd();
-        });
-
-        window.addEventListener('touchend', () => {
-          handleEnd();
-        });
-      }
-
-      {
-        const pc = new RTCPeerConnection({
-          iceServers: [
-            {
-              urls: 'stun:stun.l.google.com:19302',
-            },
-          ],
-        });
-        pc.ontrack = event => {
-          console.log('ontrack', event);
-          if (event.track.kind !== 'video') {
-            return;
-          }
-
-          const el = document.getElementById('video');
-          el.srcObject = event.streams[0];
-          el.autoplay = true;
-          el.controls = false;
-          el.muted = true;
-          el.playsinline = true;
-          el.onloadeddata = () => console.log('loaded data');
+      window.addEventListener('load', () => {
+        window.sendOffset = (x, y) => {
+          // Waiting for data channel :)
         };
 
-        pc.onconnectionstatechange = ev => {
-          console.log(ev);
-        };
+        // Joystick stuff
+        {
+          const parentEl = document.getElementById('joystick');
+          const stickEl = parentEl.querySelector('div');
 
-        pc.ondatachannel = e => {
-          console.log('dc', e);
-          const dc = e.channel;
-
-          dc.onclose = () => {
-            if (dc.label === 'control') {
-              window.sendOffset = (x, y) => {};
+          let moving = false;
+          function handleClientXY(clientX, clientY) {
+            if (!moving) {
+              return;
             }
-          };
 
-          dc.onopen = () => {
-            if (dc.label === 'control') {
-              window.sendOffset = (x, y) => {
-                dc.send(JSON.stringify({ Move: [x, y] }));
-              };
-            }
-          };
-
-          dc.onmessage = e =>
-            console.log(
-              `Message from DataChannel '${dc.label}' payload '${e.data}'`
+            const parentRect = parentEl.getBoundingClientRect();
+            const offsetX = clientX - parentRect.left - parentRect.width / 2;
+            const offsetY = clientY - parentRect.top - parentRect.height / 2;
+            const angle = Math.atan2(offsetY, offsetX);
+            const maxRadius = parentRect.width / 2;
+            const distance = Math.min(
+              maxRadius,
+              Math.sqrt(Math.pow(offsetX, 2) + Math.pow(offsetY, 2))
             );
-        };
+            const x = distance * Math.cos(angle);
+            const y = distance * Math.sin(angle);
+            sendOffset(x / maxRadius, (y / maxRadius) * -1);
 
-        // Create a noop DataChannel. By default PeerConnections do not connect
-        // if they have no media tracks or DataChannels
-        pc.createDataChannel('noop');
-        pc.addTransceiver('video');
+            stickEl.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+          }
 
-        pc.createOffer()
-          .then(offer => {
-            pc.setLocalDescription(offer);
+          function handleEnd() {
+            moving = false;
+            stickEl.style.transform = `translate(-50%, -50%)`;
+            sendOffset(0, 0);
+          }
 
-            return fetch('/createPeerConnection', {
-              method: 'post',
-              headers: {
-                Accept: 'application/json, text/plain, */*',
-                'Content-Type': 'application/json',
+          parentEl.addEventListener('mousedown', e => {
+            moving = true;
+          });
+
+          parentEl.addEventListener('touchstart', e => {
+            moving = true;
+          });
+
+          document.addEventListener('mousemove', e => {
+            handleClientXY(e.clientX, e.clientY);
+          });
+
+          document.addEventListener('touchmove', e => {
+            const touch = e.touches[0];
+            if (!touch) {
+              return;
+            }
+
+            handleClientXY(touch.clientX, touch.clientY);
+          });
+
+          document.addEventListener('mouseup', () => {
+            handleEnd();
+          });
+
+          document.addEventListener('touchend', () => {
+            handleEnd();
+          });
+        }
+
+        {
+          const pc = new RTCPeerConnection({
+            iceServers: [
+              {
+                urls: 'stun:stun.l.google.com:19302',
               },
-              body: JSON.stringify(offer),
-            });
-          })
-          .then(res => res.json())
-          .then(res => pc.setRemoteDescription(res))
-          .catch(alert);
-      }
+            ],
+          });
+          pc.ontrack = event => {
+            console.log('ontrack', event);
+            if (event.track.kind !== 'video') {
+              return;
+            }
+
+            const el = document.getElementById('video');
+            el.srcObject = event.streams[0];
+            el.autoplay = true;
+            el.controls = false;
+            el.muted = true;
+            el.playsinline = true;
+            el.onloadeddata = () => console.log('loaded data');
+          };
+
+          pc.onconnectionstatechange = ev => {
+            console.log(ev);
+          };
+
+          pc.ondatachannel = e => {
+            console.log('dc', e);
+            const dc = e.channel;
+
+            dc.onclose = () => {
+              if (dc.label === 'control') {
+                window.sendOffset = (x, y) => {};
+              }
+            };
+
+            dc.onopen = () => {
+              if (dc.label === 'control') {
+                window.sendOffset = (x, y) => {
+                  try {
+                    dc.send(JSON.stringify({ Move: [x, y] }));
+                  } catch {}
+                };
+              }
+            };
+
+            dc.onmessage = e =>
+              console.log(
+                `Message from DataChannel '${dc.label}' payload '${e.data}'`
+              );
+          };
+
+          // Create a noop DataChannel. By default PeerConnections do not connect
+          // if they have no media tracks or DataChannels
+          pc.createDataChannel('noop');
+          pc.addTransceiver('video');
+
+          pc.createOffer()
+            .then(offer => {
+              pc.setLocalDescription(offer);
+
+              return fetch('/createPeerConnection', {
+                method: 'post',
+                headers: {
+                  Accept: 'application/json, text/plain, */*',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(offer),
+              });
+            })
+            .then(res => res.json())
+            .then(res => pc.setRemoteDescription(res))
+            .catch(alert);
+        }
+      });
     </script>
   </body>
 </html>

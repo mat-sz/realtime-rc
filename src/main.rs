@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     MotorActor.start();
 
     println!("Press ctrl-c to stop");
-    println!("Starting server at: http://127.0.0.1:8080/");
+    println!("Starting server at: http://0.0.0.0:8080/");
     http::start().await;
 
     Ok(())
