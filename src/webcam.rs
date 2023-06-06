@@ -2,7 +2,6 @@ use crate::command;
 use actix::prelude::*;
 use actix::Actor;
 use actix_broker::BrokerSubscribe;
-use anyhow::Result;
 use bytes::Bytes;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{ApiBackend, RequestedFormat, RequestedFormatType};
@@ -157,7 +156,6 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
             actix_rt::spawn(async move {
                 let mut rtcp_buf = vec![0u8; 1500];
                 while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-                Result::<()>::Ok(())
             });
 
             pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {

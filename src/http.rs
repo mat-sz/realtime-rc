@@ -1,7 +1,7 @@
 use actix_broker::{Broker, SystemBroker};
 use actix_files::NamedFile;
-use actix_web::{post, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
-use std::path::{Path, PathBuf};
+use actix_web::{get, post, App, HttpResponse, HttpServer, Responder};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -21,9 +21,9 @@ lazy_static! {
     static ref CLIENT_COUNTER: Arc<Mutex<u16>> = Arc::new(Mutex::new(0));
 }
 
-async fn index(req: HttpRequest) -> actix_web::Result<NamedFile> {
-    let path: PathBuf = req.match_info().query("filename").parse().unwrap();
-    Ok(NamedFile::open(Path::new("./public/").join(path))?)
+#[get("/")]
+async fn index() -> actix_web::Result<NamedFile> {
+    Ok(NamedFile::open(Path::new("./public/index.html"))?)
 }
 
 // do_signaling exchanges all state of the local PeerConnection and is called
@@ -129,14 +129,10 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
 }
 
 pub async fn start() {
-    HttpServer::new(|| {
-        App::new()
-            .service(create_peer_connection)
-            .route("/{filename:.*}", web::get().to(index))
-    })
-    .bind(("0.0.0.0", 8080))
-    .unwrap()
-    .run()
-    .await
-    .unwrap();
+    HttpServer::new(|| App::new().service(create_peer_connection).service(index))
+        .bind(("0.0.0.0", 8080))
+        .unwrap()
+        .run()
+        .await
+        .unwrap();
 }

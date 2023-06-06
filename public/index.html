@@ -14,6 +14,9 @@
         user-select: none;
         touch-action: none;
         -webkit-touch-callout: none;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue',
+          sans-serif;
       }
 
       video {
@@ -45,9 +48,19 @@
         top: 50%;
         transform: translate(-50%, -50%);
       }
+
+      #status {
+        font-size: 2rem;
+        text-align: center;
+        padding: 1rem;
+        position: absolute;
+        left: 0;
+        right: 0;
+      }
     </style>
   </head>
   <body>
+    <div id="status">Waiting for stream...</div>
     <video id="video" muted autoplay playsinline></video>
     <div class="controls">
       <div class="joystick" id="joystick">
@@ -124,7 +137,9 @@
           });
         }
 
+        // WebRTC
         {
+          const statusEl = document.getElementById('status');
           const pc = new RTCPeerConnection({
             iceServers: [
               {
@@ -144,7 +159,9 @@
             el.controls = false;
             el.muted = true;
             el.playsinline = true;
-            el.onloadeddata = () => console.log('loaded data');
+            el.onloadeddata = () => {
+              statusEl.style.display = 'none';
+            };
           };
 
           pc.onconnectionstatechange = ev => {

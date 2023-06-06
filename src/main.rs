@@ -1,5 +1,4 @@
 use actix::Actor;
-use anyhow::Result;
 
 use crate::motor::MotorActor;
 use crate::webcam::WebcamActor;
@@ -13,7 +12,7 @@ mod webcam;
 extern crate lazy_static;
 
 #[actix_web::main]
-async fn main() -> Result<()> {
+async fn main() {
     println!("realtime-rc");
 
     WebcamActor.start();
@@ -22,6 +21,4 @@ async fn main() -> Result<()> {
     println!("Press ctrl-c to stop");
     println!("Starting server at: http://0.0.0.0:8080/");
     http::start().await;
-
-    Ok(())
 }
