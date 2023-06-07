@@ -1,8 +1,9 @@
 use actix_broker::{Broker, SystemBroker};
-use actix_files::NamedFile;
-use actix_web::{get, post, App, HttpResponse, HttpServer, Responder};
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use log::info;
-use std::path::Path;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -21,14 +22,23 @@ use webrtc::track::track_local::TrackLocal;
 
 use crate::command;
 
-#[get("/")]
-async fn index() -> actix_web::Result<NamedFile> {
-    Ok(NamedFile::open(Path::new("./public/index.html"))?)
+static INDEX_FILE: &'static str = include_str!("../public/index.html");
+
+async fn index() -> Result<Response<Body>, hyper::Error> {
+    Ok(Response::new(Body::from(INDEX_FILE)))
 }
 
 // do_signaling exchanges all state of the local PeerConnection and is called
 // every time a video is added or removed
-async fn do_signaling(pc: &Arc<RTCPeerConnection>, sdp_str: String) -> impl Responder {
+async fn do_signaling(
+    pc: &Arc<RTCPeerConnection>,
+    r: Request<Body>,
+) -> Result<Response<Body>, hyper::Error> {
+    let sdp_str = match std::str::from_utf8(&hyper::body::to_bytes(r.into_body()).await?) {
+        Ok(s) => s.to_owned(),
+        Err(err) => panic!("{}", err),
+    };
+
     let offer = match serde_json::from_str::<RTCSessionDescription>(&sdp_str) {
         Ok(s) => s,
         Err(err) => panic!("{}", err),
@@ -66,13 +76,19 @@ async fn do_signaling(pc: &Arc<RTCPeerConnection>, sdp_str: String) -> impl Resp
         panic!("generate local_description failed!");
     };
 
-    HttpResponse::Ok()
-        .content_type("application/json")
-        .body(payload)
+    let mut response = match Response::builder()
+        .header("content-type", "application/json")
+        .body(Body::from(payload))
+    {
+        Ok(res) => res,
+        Err(err) => panic!("{}", err),
+    };
+
+    *response.status_mut() = StatusCode::OK;
+    Ok(response)
 }
 
-#[post("/createPeerConnection")]
-async fn create_peer_connection(req_body: String) -> impl Responder {
+async fn create_peer_connection(r: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     // Create a MediaEngine object to configure the supported codec
     let mut m = MediaEngine::default();
 
@@ -158,18 +174,33 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
             info!("[{id}] Disconnected, stopping stream");
             Broker::<SystemBroker>::issue_async(command::StopVideoStream(id));
         }
-
         Box::pin(async {})
     }));
 
-    do_signaling(&pc, req_body).await
+    do_signaling(&pc, r).await
+}
+
+async fn remote_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/") | (&Method::GET, "/index.html") => index().await,
+
+        (&Method::POST, "/createPeerConnection") => create_peer_connection(req).await,
+
+        // Return the 404 Not Found for other routes.
+        _ => {
+            let mut not_found = Response::default();
+            *not_found.status_mut() = StatusCode::NOT_FOUND;
+            Ok(not_found)
+        }
+    }
 }
 
 pub async fn start(host: String, port: u16) {
-    HttpServer::new(|| App::new().service(create_peer_connection).service(index))
-        .bind((host, port))
-        .unwrap()
-        .run()
-        .await
-        .unwrap();
+    let addr = SocketAddr::new(IpAddr::from_str(&host).unwrap(), port);
+    let service = make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(remote_handler)) });
+    let server = Server::bind(&addr).serve(service);
+
+    if let Err(e) = server.await {
+        eprintln!("server error: {e}");
+    }
 }

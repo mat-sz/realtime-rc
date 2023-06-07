@@ -6,6 +6,7 @@ use env_logger::Env;
 use gumdrop::Options;
 use local_ip_address::local_ip;
 use nokhwa::{nokhwa_initialize, query, utils::ApiBackend};
+use tokio::signal;
 
 mod command;
 mod http;
@@ -33,7 +34,7 @@ struct Args {
     help: bool,
 }
 
-#[actix_web::main]
+#[actix_rt::main]
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let args = Args::parse_args_default_or_exit();
@@ -89,4 +90,7 @@ async fn main() {
     println!();
 
     http::start(args.host, args.port).await;
+    signal::ctrl_c().await.unwrap();
+
+    println!("Exiting...");
 }
