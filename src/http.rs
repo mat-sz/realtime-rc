@@ -124,9 +124,9 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
     do_signaling(&pc, req_body).await
 }
 
-pub async fn start() {
+pub async fn start(host: String, port: u16) {
     HttpServer::new(|| App::new().service(create_peer_connection).service(index))
-        .bind(("0.0.0.0", 8080))
+        .bind((host, port))
         .unwrap()
         .run()
         .await

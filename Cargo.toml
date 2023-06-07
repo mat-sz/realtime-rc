@@ -26,6 +26,7 @@ embedded-hal = "0.2.7"
 linux-embedded-hal = "0.3"
 adafruit_motorkit = "0.1.1"
 local-ip-address = "0.5.3"
+gumdrop = "0.8"
 
 [dependencies.nokhwa]
 version = "0.10.0"

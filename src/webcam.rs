@@ -37,7 +37,9 @@ fn rgb_to_h264(frame: Arc<nokhwa::Buffer>, encoder: &mut openh264::encoder::Enco
     Bytes::from(h264.to_vec())
 }
 
-pub struct WebcamActor;
+pub struct WebcamActor {
+    pub camera_index: u32,
+}
 
 // Provide Actor implementation for our actor
 impl Actor for WebcamActor {
@@ -46,8 +48,9 @@ impl Actor for WebcamActor {
     fn started(&mut self, ctx: &mut Context<Self>) {
         info!("Actor is alive");
         self.subscribe_system_async::<command::NewPeerConnection>(ctx);
+        let camera_index = self.camera_index;
 
-        thread::spawn(|| {
+        thread::spawn(move || {
             nokhwa_initialize(|granted| {
                 info!("Camera initialized: {}", granted);
             });
@@ -56,12 +59,11 @@ impl Actor for WebcamActor {
                 .iter()
                 .for_each(|cam| info!("Found camera: {:?}", cam));
 
-            let first_camera = cameras.last().unwrap();
-
             // request the absolute highest resolution CameraFormat that can be decoded to RGB.
             let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
             // make the camera
-            let mut camera = Camera::new(first_camera.index().clone(), requested).unwrap();
+            let mut camera =
+                Camera::new(nokhwa::utils::CameraIndex::Index(camera_index), requested).unwrap();
             camera.open_stream().unwrap();
 
             #[allow(clippy::empty_loop)] // keep it running
