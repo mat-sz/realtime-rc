@@ -1030,7 +1030,6 @@ dependencies = [
  "humantime",
  "is-terminal",
  "log",
- "regex",
  "termcolor",
 ]
 
@@ -2000,18 +1999,18 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openh264"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea6f884c2b7f72ebf4e06a28b88cefa43085da71345d5595d6ec17a0f79e13b2"
+checksum = "600b99d1e0c3fa646809ae2da366f40d3d25471f6d778d580ccf8bc1bd2804dc"
 dependencies = [
  "openh264-sys2",
 ]
 
 [[package]]
 name = "openh264-sys2"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171fdb16e88a11b400d5b41c275f69f65f6e63e2920152621a99c3c2dc50ec4a"
+checksum = "c26c99dead917099fc399282c348e7165edf68761dbcf850c79b3a1a60fda322"
 dependencies = [
  "cc",
  "nasm-rs",

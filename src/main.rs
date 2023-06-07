@@ -89,7 +89,10 @@ async fn main() {
 
     println!();
 
-    http::start(args.host, args.port).await;
+    actix_rt::spawn(async move {
+        http::start(args.host, args.port).await;
+    });
+
     signal::ctrl_c().await.unwrap();
 
     println!("Exiting...");
