@@ -3,6 +3,7 @@ use actix::prelude::*;
 use actix::Actor;
 use actix_broker::BrokerSubscribe;
 use bytes::Bytes;
+use log::info;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{ApiBackend, RequestedFormat, RequestedFormatType};
 use nokhwa::{nokhwa_initialize, query, Camera};
@@ -43,15 +44,17 @@ impl Actor for WebcamActor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Context<Self>) {
-        println!("[WEBCAM] Actor is alive");
+        info!("Actor is alive");
         self.subscribe_system_async::<command::NewPeerConnection>(ctx);
 
         thread::spawn(|| {
             nokhwa_initialize(|granted| {
-                println!("Camera initialized: {}", granted);
+                info!("Camera initialized: {}", granted);
             });
             let cameras = query(ApiBackend::Auto).unwrap();
-            cameras.iter().for_each(|cam| println!("{:?}", cam));
+            cameras
+                .iter()
+                .for_each(|cam| info!("Found camera: {:?}", cam));
 
             let first_camera = cameras.last().unwrap();
 
@@ -63,15 +66,8 @@ impl Actor for WebcamActor {
 
             #[allow(clippy::empty_loop)] // keep it running
             loop {
-                // get a frame
-                match camera.frame() {
-                    Ok(frame) => {
-                        *CURRENT_FRAME.lock().unwrap() = Some(Arc::new(frame));
-                    }
-                    Err(e) => {
-                        println!("error {e}");
-                    }
-                }
+                let frame = camera.frame().unwrap();
+                *CURRENT_FRAME.lock().unwrap() = Some(Arc::new(frame));
 
                 thread::sleep(Duration::from_millis(10));
             }
@@ -79,7 +75,7 @@ impl Actor for WebcamActor {
     }
 
     fn stopped(&mut self, _: &mut Context<Self>) {
-        println!("[WEBCAM] Actor is stopped");
+        info!("Actor is stopped");
     }
 }
 
@@ -88,7 +84,7 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
 
     fn handle(&mut self, cmd: command::NewPeerConnection, _: &mut Context<Self>) -> Self::Result {
         let command::NewPeerConnection(pc) = cmd;
-        println!("NewPeerConnection");
+        info!("NewPeerConnection");
 
         actix_rt::spawn(async move {
             let video_track = Arc::new(TrackLocalStaticSample::new(
@@ -119,8 +115,8 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
                     option.unwrap().clone().unwrap()
                 };
 
-                println!(
-                    "camera frame {} {}",
+                info!(
+                    "Stream: camera frame {} {}",
                     frame.resolution().width(),
                     frame.resolution().height()
                 );
@@ -134,22 +130,27 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
                 let mut h264_encoder =
                     openh264::encoder::Encoder::with_config(h264_encoder_config).unwrap();
 
+                let mut interval = actix_rt::time::interval(Duration::from_millis(20));
                 loop {
-                    actix_rt::time::sleep(Duration::from_millis(33)).await;
+                    interval.tick().await;
 
                     let frame = {
                         let option = CURRENT_FRAME.lock();
                         option.unwrap().clone().unwrap()
                     };
 
-                    video_track
+                    let result = video_track
                         .write_sample(&Sample {
                             data: rgb_to_h264(frame, &mut h264_encoder),
                             duration: Duration::from_millis(33),
                             ..Default::default()
                         })
-                        .await
-                        .unwrap();
+                        .await;
+
+                    if result.is_err() {
+                        info!("Error sending sample, exiting");
+                        return;
+                    }
                 }
             });
 
@@ -160,7 +161,7 @@ impl Handler<command::NewPeerConnection> for WebcamActor {
 
             pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
                 if s == RTCPeerConnectionState::Connected {
-                    println!("Status connected, starting stream");
+                    info!("Status connected, starting stream");
                     notify_tx.notify_waiters();
                 }
 

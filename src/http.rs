@@ -1,10 +1,10 @@
 use actix_broker::{Broker, SystemBroker};
 use actix_files::NamedFile;
 use actix_web::{get, post, App, HttpResponse, HttpServer, Responder};
+use log::info;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
@@ -16,10 +16,6 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
 use crate::command;
-
-lazy_static! {
-    static ref CLIENT_COUNTER: Arc<Mutex<u16>> = Arc::new(Mutex::new(0));
-}
 
 #[get("/")]
 async fn index() -> actix_web::Result<NamedFile> {
@@ -122,7 +118,7 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
         Box::pin(async move {})
     }));
 
-    println!("PeerConnection has been created");
+    info!("PeerConnection has been created");
 
     actix_rt::time::sleep(Duration::from_millis(2000)).await;
     do_signaling(&pc, req_body).await

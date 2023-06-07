@@ -6,6 +6,7 @@ use actix_broker::BrokerSubscribe;
 use adafruit_motorkit::{dc::DcMotor, init_pwm, Motor};
 use embedded_hal::blocking::i2c::Read;
 use linux_embedded_hal::I2cdev;
+use log::{debug, info};
 
 lazy_static! {
     static ref MOTOR_TYPE: Arc<Mutex<MotorType>> = Arc::new(Mutex::new(MotorType::None));
@@ -25,7 +26,7 @@ impl Actor for MotorActor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Context<Self>) {
-        println!("[MOTOR] Actor is alive");
+        info!("Actor is alive");
         self.subscribe_system_async::<command::Move>(ctx);
 
         match I2cdev::new("/dev/i2c-1") {
@@ -37,10 +38,10 @@ impl Actor for MotorActor {
                     match i2c.read(i, &mut buf) {
                         Ok(()) => {
                             if i == 93 {
-                                println!("Found sparkfun motors");
+                                info!("Found sparkfun motors");
                                 motor_type = MotorType::Sparkfun;
                             } else if i == 96 {
-                                println!("Found adafruit motors");
+                                info!("Found adafruit motors");
                                 motor_type = MotorType::Adafruit;
                             }
                         }
@@ -50,22 +51,26 @@ impl Actor for MotorActor {
 
                 *MOTOR_TYPE.lock().unwrap() = motor_type;
             }
-            Err(_) => println!("Unable to find i2c"),
+            Err(_) => info!("Unable to find i2c"),
         }
     }
 
-    fn stopped(&mut self, _: &mut Context<Self>) {
+    fn stopping(&mut self, _: &mut Context<Self>) -> actix::Running {
+        info!("Actor is being stopped");
+
         let motor_type = { MOTOR_TYPE.lock().unwrap() };
 
         if motor_type.eq(&MotorType::None) {
-            let mut pwm = init_pwm(None).unwrap();
-            let mut left_motor = DcMotor::try_new(&mut pwm, Motor::Motor1).unwrap();
-            let mut right_motor = DcMotor::try_new(&mut pwm, Motor::Motor2).unwrap();
-            left_motor.stop(&mut pwm).unwrap();
-            right_motor.stop(&mut pwm).unwrap();
+            return actix::Running::Stop;
         }
 
-        println!("[MOTOR] Actor is stopped");
+        let mut pwm = init_pwm(None).unwrap();
+        let mut left_motor = DcMotor::try_new(&mut pwm, Motor::Motor1).unwrap();
+        let mut right_motor = DcMotor::try_new(&mut pwm, Motor::Motor2).unwrap();
+        left_motor.stop(&mut pwm).unwrap();
+        right_motor.stop(&mut pwm).unwrap();
+
+        actix::Running::Stop
     }
 }
 
@@ -79,6 +84,8 @@ impl Handler<command::Move> for MotorActor {
         let speed = (x.powf(2.0) + y.powf(2.0)).sqrt() * multiplier;
         let left_speed = if x > 0.0 { speed - x * 2.0 } else { speed };
         let right_speed = if x < 0.0 { speed + x * 2.0 } else { speed };
+
+        debug!("X/Y: {x} {y}, left: {left_speed}, right: {right_speed}");
 
         let motor_type = { MOTOR_TYPE.lock().unwrap() };
         if motor_type.eq(&MotorType::None) {
