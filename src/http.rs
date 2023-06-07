@@ -4,16 +4,20 @@ use actix_web::{get, post, App, HttpResponse, HttpServer, Responder};
 use log::info;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use uuid::Uuid;
 use webrtc::api::interceptor_registry::register_default_interceptors;
-use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
+use webrtc::track::track_local::TrackLocal;
 
 use crate::command;
 
@@ -98,8 +102,13 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
         ..Default::default()
     };
 
+    let id = Uuid::new_v4();
+
     // Create a new RTCPeerConnection
     let pc = Arc::new(api.new_peer_connection(config).await.unwrap());
+
+    info!("[{id}] New connection");
+
     Broker::<SystemBroker>::issue_async(command::NewPeerConnection(pc.clone()));
 
     // Command handling:
@@ -118,9 +127,36 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
         Box::pin(async move {})
     }));
 
-    info!("PeerConnection has been created");
+    // Video track:
+    let video_track = Arc::new(TrackLocalStaticSample::new(
+        RTCRtpCodecCapability {
+            mime_type: MIME_TYPE_H264.to_owned(),
+            ..Default::default()
+        },
+        "video".to_owned(),
+        "webrtc-rs".to_owned(),
+    ));
 
-    actix_rt::time::sleep(Duration::from_millis(2000)).await;
+    // Add this newly created track to the PeerConnection
+    let rtp_sender = pc
+        .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        let mut rtcp_buf = vec![0u8; 1500];
+        while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+    });
+
+    pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
+        if s == RTCPeerConnectionState::Connected {
+            info!("[{id}] Connected, starting stream");
+            Broker::<SystemBroker>::issue_async(command::StartVideoStream(id, video_track.clone()));
+        }
+
+        Box::pin(async {})
+    }));
+
     do_signaling(&pc, req_body).await
 }
 

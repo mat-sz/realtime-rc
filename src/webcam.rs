@@ -12,13 +12,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use tokio::sync::Notify;
-use webrtc::api::media_engine::MIME_TYPE_H264;
 use webrtc::media::Sample;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
-use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
-use webrtc::track::track_local::TrackLocal;
 
 lazy_static! {
     static ref CURRENT_FRAME: Arc<Mutex<Option<Arc<nokhwa::Buffer>>>> = Arc::new(Mutex::new(None));
@@ -47,7 +41,7 @@ impl Actor for WebcamActor {
 
     fn started(&mut self, ctx: &mut Context<Self>) {
         info!("Actor is alive");
-        self.subscribe_system_async::<command::NewPeerConnection>(ctx);
+        self.subscribe_system_async::<command::StartVideoStream>(ctx);
         let camera_index = self.camera_index;
 
         thread::spawn(move || {
@@ -71,7 +65,7 @@ impl Actor for WebcamActor {
                 let frame = camera.frame().unwrap();
                 *CURRENT_FRAME.lock().unwrap() = Some(Arc::new(frame));
 
-                thread::sleep(Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(20));
             }
         });
     }
@@ -81,97 +75,56 @@ impl Actor for WebcamActor {
     }
 }
 
-impl Handler<command::NewPeerConnection> for WebcamActor {
+impl Handler<command::StartVideoStream> for WebcamActor {
     type Result = ();
 
-    fn handle(&mut self, cmd: command::NewPeerConnection, _: &mut Context<Self>) -> Self::Result {
-        let command::NewPeerConnection(pc) = cmd;
-        info!("NewPeerConnection");
+    fn handle(&mut self, cmd: command::StartVideoStream, _: &mut Context<Self>) -> Self::Result {
+        let command::StartVideoStream(id, video_track) = cmd;
+        info!("[{id}] StartVideoStream");
 
-        actix_rt::spawn(async move {
-            let video_track = Arc::new(TrackLocalStaticSample::new(
-                RTCRtpCodecCapability {
-                    mime_type: MIME_TYPE_H264.to_owned(),
-                    ..Default::default()
-                },
-                "video".to_owned(),
-                "webrtc-rs".to_owned(),
-            ));
+        tokio::spawn(async move {
+            let frame = {
+                let option = CURRENT_FRAME.lock();
+                option.unwrap().clone().unwrap()
+            };
 
-            // Add this newly created track to the PeerConnection
-            let rtp_sender = pc
-                .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
-                .await
-                .unwrap();
+            info!(
+                "[{id}] Stream: camera frame {} {}",
+                frame.resolution().width(),
+                frame.resolution().height()
+            );
 
-            let notify_tx = Arc::new(Notify::new());
-            let notify_video = notify_tx.clone();
+            let h264_encoder_config = openh264::encoder::EncoderConfig::new(
+                frame.resolution().width(),
+                frame.resolution().height(),
+            );
+            h264_encoder_config.enable_skip_frame(true);
+            h264_encoder_config.max_frame_rate(30.0);
+            let mut h264_encoder =
+                openh264::encoder::Encoder::with_config(h264_encoder_config).unwrap();
 
-            // Video handling:
-            let video_task = actix_rt::spawn(async move {
-                notify_video.notified().await;
-                actix_rt::time::sleep(Duration::from_millis(2500)).await;
+            let mut interval = tokio::time::interval(Duration::from_millis(20));
+            loop {
+                interval.tick().await;
 
                 let frame = {
                     let option = CURRENT_FRAME.lock();
                     option.unwrap().clone().unwrap()
                 };
 
-                info!(
-                    "Stream: camera frame {} {}",
-                    frame.resolution().width(),
-                    frame.resolution().height()
-                );
+                let result = video_track
+                    .write_sample(&Sample {
+                        data: rgb_to_h264(frame, &mut h264_encoder),
+                        duration: Duration::from_millis(20),
+                        ..Default::default()
+                    })
+                    .await;
 
-                let h264_encoder_config = openh264::encoder::EncoderConfig::new(
-                    frame.resolution().width(),
-                    frame.resolution().height(),
-                );
-                h264_encoder_config.enable_skip_frame(true);
-                h264_encoder_config.max_frame_rate(30.0);
-                let mut h264_encoder =
-                    openh264::encoder::Encoder::with_config(h264_encoder_config).unwrap();
-
-                let mut interval = actix_rt::time::interval(Duration::from_millis(20));
-                loop {
-                    interval.tick().await;
-
-                    let frame = {
-                        let option = CURRENT_FRAME.lock();
-                        option.unwrap().clone().unwrap()
-                    };
-
-                    let result = video_track
-                        .write_sample(&Sample {
-                            data: rgb_to_h264(frame, &mut h264_encoder),
-                            duration: Duration::from_millis(33),
-                            ..Default::default()
-                        })
-                        .await;
-
-                    if result.is_err() {
-                        info!("Error sending sample, exiting");
-                        return;
-                    }
+                if result.is_err() {
+                    info!("[{id}] Error sending sample, exiting");
+                    return;
                 }
-            });
-
-            actix_rt::spawn(async move {
-                let mut rtcp_buf = vec![0u8; 1500];
-                while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            });
-
-            pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-                if s == RTCPeerConnectionState::Connected {
-                    info!("Status connected, starting stream");
-                    notify_tx.notify_waiters();
-                }
-
-                if s == RTCPeerConnectionState::Disconnected {
-                    video_task.abort();
-                }
-                Box::pin(async {})
-            }));
+            }
         });
     }
 }
