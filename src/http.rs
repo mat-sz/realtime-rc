@@ -154,6 +154,11 @@ async fn create_peer_connection(req_body: String) -> impl Responder {
             Broker::<SystemBroker>::issue_async(command::StartVideoStream(id, video_track.clone()));
         }
 
+        if s == RTCPeerConnectionState::Disconnected {
+            info!("[{id}] Disconnected, stopping stream");
+            Broker::<SystemBroker>::issue_async(command::StopVideoStream(id));
+        }
+
         Box::pin(async {})
     }));
 

@@ -22,4 +22,8 @@ pub struct StartVideoStream(pub Uuid, pub Arc<TrackLocalStaticSample>);
 
 #[derive(Clone, Message)]
 #[rtype(result = "()")]
+pub struct StopVideoStream(pub Uuid);
+
+#[derive(Clone, Message)]
+#[rtype(result = "()")]
 pub struct Move(pub f32, pub f32);

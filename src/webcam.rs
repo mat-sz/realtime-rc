@@ -8,14 +8,22 @@ use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{ApiBackend, RequestedFormat, RequestedFormatType};
 use nokhwa::{nokhwa_initialize, query, Camera};
 use openh264::formats::YUVBuffer;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use tokio::task::JoinHandle;
+use uuid::Uuid;
 use webrtc::media::Sample;
 
 lazy_static! {
     static ref CURRENT_FRAME: Arc<Mutex<Option<Arc<nokhwa::Buffer>>>> = Arc::new(Mutex::new(None));
+}
+
+lazy_static! {
+    static ref VIDEO_TASKS: Arc<Mutex<HashMap<Uuid, JoinHandle<()>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 }
 
 fn rgb_to_h264(frame: Arc<nokhwa::Buffer>, encoder: &mut openh264::encoder::Encoder) -> Bytes {
@@ -42,6 +50,7 @@ impl Actor for WebcamActor {
     fn started(&mut self, ctx: &mut Context<Self>) {
         info!("Actor is alive");
         self.subscribe_system_async::<command::StartVideoStream>(ctx);
+        self.subscribe_system_async::<command::StopVideoStream>(ctx);
         let camera_index = self.camera_index;
 
         thread::spawn(move || {
@@ -60,18 +69,42 @@ impl Actor for WebcamActor {
                 Camera::new(nokhwa::utils::CameraIndex::Index(camera_index), requested).unwrap();
             camera.open_stream().unwrap();
 
+            let frame = camera.frame().unwrap();
+            *CURRENT_FRAME.lock().unwrap() = Some(Arc::new(frame));
+
             #[allow(clippy::empty_loop)] // keep it running
             loop {
-                let frame = camera.frame().unwrap();
-                *CURRENT_FRAME.lock().unwrap() = Some(Arc::new(frame));
+                let count = VIDEO_TASKS.lock().unwrap().values().len();
+
+                if count == 0 {
+                    if camera.is_stream_open() {
+                        info!("No more video tasks, closing stream.");
+                        camera.stop_stream().unwrap();
+                    }
+                } else if camera.is_stream_open() {
+                    let frame = camera.frame().unwrap();
+                    *CURRENT_FRAME.lock().unwrap() = Some(Arc::new(frame));
+                } else {
+                    info!("New video task, opening stream.");
+                    camera.open_stream().unwrap();
+                }
 
                 thread::sleep(Duration::from_millis(20));
             }
         });
     }
 
-    fn stopped(&mut self, _: &mut Context<Self>) {
-        info!("Actor is stopped");
+    fn stopping(&mut self, _: &mut Context<Self>) -> actix::Running {
+        info!("Actor is being stopped");
+
+        let mut tasks: std::sync::MutexGuard<HashMap<Uuid, JoinHandle<()>>> =
+            VIDEO_TASKS.lock().unwrap();
+        for task in tasks.values() {
+            task.abort();
+        }
+        tasks.clear();
+
+        actix::Running::Stop
     }
 }
 
@@ -82,7 +115,7 @@ impl Handler<command::StartVideoStream> for WebcamActor {
         let command::StartVideoStream(id, video_track) = cmd;
         info!("[{id}] StartVideoStream");
 
-        tokio::spawn(async move {
+        let video_task = tokio::spawn(async move {
             let frame = {
                 let option = CURRENT_FRAME.lock();
                 option.unwrap().clone().unwrap()
@@ -122,9 +155,31 @@ impl Handler<command::StartVideoStream> for WebcamActor {
 
                 if result.is_err() {
                     info!("[{id}] Error sending sample, exiting");
+                    VIDEO_TASKS.lock().unwrap().remove(&id);
                     return;
                 }
             }
         });
+
+        {
+            VIDEO_TASKS.lock().unwrap().insert(id, video_task);
+        }
+    }
+}
+
+impl Handler<command::StopVideoStream> for WebcamActor {
+    type Result = ();
+
+    fn handle(&mut self, cmd: command::StopVideoStream, _: &mut Context<Self>) -> Self::Result {
+        let command::StopVideoStream(id) = cmd;
+        info!("[{id}] StopVideoStream");
+
+        let mut tasks = VIDEO_TASKS.lock().unwrap();
+        let video_task = tasks.get(&id);
+
+        if video_task.is_some() {
+            video_task.unwrap().abort();
+            tasks.remove(&id);
+        }
     }
 }
