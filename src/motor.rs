@@ -82,8 +82,9 @@ impl Handler<command::Move> for MotorActor {
 
         let multiplier = if y < 0.0 { -1.0 } else { 1.0 };
         let speed = (x.powf(2.0) + y.powf(2.0)).sqrt() * multiplier;
-        let left_speed = if x > 0.0 { speed - x * 2.0 } else { speed };
-        let right_speed = if x < 0.0 { speed + x * 2.0 } else { speed };
+        let mul = if speed < 0.0 { 2.0 } else { -2.0 };
+        let left_speed = if x > 0.0 { speed + x * mul } else { speed };
+        let right_speed = if x < 0.0 { speed - x * mul } else { speed };
 
         debug!("X/Y: {x} {y}, left: {left_speed}, right: {right_speed}");
 
