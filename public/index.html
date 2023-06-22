@@ -117,6 +117,7 @@
            * @param {(x: number, y: number) => void} onOffset
            */
           constructor(wrapperEl, onOffset) {
+            this.onOffset = onOffset;
             this.parentEl = document.createElement('div');
             this.parentEl.classList.add('joystick');
 
@@ -304,6 +305,10 @@
            * @param {number} y
            */
           sendOffset(x, y) {
+            if (!this.controlChannel) {
+              return;
+            }
+
             this.controlChannel.send(JSON.stringify({ Move: [x, y] }));
           }
         }
